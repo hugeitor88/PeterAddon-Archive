@@ -114,9 +114,15 @@ function AddonsTab() {
         try {
             console.log('[Upload] Starting upload process...');
             
-            // Use websim.upload for file storage
-            console.log('[Upload] Uploading file to Websim storage...');
-            const fileUrl = await websim.upload(selectedFile);
+            // Use websim.upload if available, otherwise show error
+            let fileUrl;
+            if (typeof websim !== 'undefined' && websim.upload) {
+                console.log('[Upload] Uploading file to Websim storage...');
+                fileUrl = await websim.upload(selectedFile);
+            } else {
+                throw new Error('Websim environment not detected. Upload only works in Websim.');
+            }
+            
             console.log('[Upload] File successfully uploaded to Websim storage:', fileUrl);
             
             // Save addon metadata using Websim records
