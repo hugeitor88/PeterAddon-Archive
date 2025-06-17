@@ -6,6 +6,7 @@ let fireApp;
 let firestore;
 let storage;
 let getFirestore, collection, addDoc, onSnapshot, ref, uploadBytes, getDownloadURL;
+let getStorage; // Add getStorage declaration
 
 /* @tweakable Firebase configuration object */
 const firebaseConfig = {
@@ -21,7 +22,7 @@ const firebaseConfig = {
 
 // Firebase initialization with validation
 const initializeFirebase = async () => {
-  if (firebaseApp) return;
+  if (fireApp) return;
   
   try {
     // Validate config
@@ -34,15 +35,15 @@ const initializeFirebase = async () => {
 
     // Import and initialize Firebase
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js');
-    firebaseApp = initializeApp(firebaseConfig);
+    fireApp = initializeApp(firebaseConfig);
     
     const firestoreModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js');
     ({ getFirestore, collection, addDoc, onSnapshot } = firestoreModule);
-    firestore = getFirestore(firebaseApp);
+    firestore = getFirestore(fireApp);
     
     const storageModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js');
-    ({ getStorage, ref, uploadBytes, getDownloadURL } = storageModule);
-    storage = getStorage(firebaseApp);
+    ({ getStorage, ref, uploadBytes, getDownloadURL } = storageModule); // Add getStorage here
+    storage = getStorage(fireApp);
   } catch (e) {
     console.error("Firebase initialization failed", e);
     
@@ -190,15 +191,14 @@ function AddonsTab() {
                 console.log('[Upload] Uploading file to Websim storage...');
                 fileUrl = await websim.upload(selectedFile);
             } else {
-                // Only use Firebase storage if we're outside Websim AND Firebase modules are available
-                if (typeof getStorage === 'function') {
-                    const storage = getStorage();
-                    const storageRef = ref(storage, `addons/${selectedFile.name}`);
-                    await uploadBytes(storageRef, selectedFile);
-                    fileUrl = await getDownloadURL(storageRef);
-                } else {
-                    throw new Error('File upload only supported in Websim');
-                }
+                // Initialize Firebase before using storage
+                await initializeFirebase();
+                
+                // Now Firebase storage functions are available
+                const storage = getStorage();
+                const storageRef = ref(storage, `addons/${selectedFile.name}`);
+                await uploadBytes(storageRef, selectedFile);
+                fileUrl = await getDownloadURL(storageRef);
             }
             
             console.log('[Upload] File successfully uploaded to Websim storage:', fileUrl);
