@@ -1,37 +1,83 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 
+const firebaseConfig = {
+  apiKey: "AIzaSyDja5QAlLu7k7Vy0ejxmKCGd7YSvTCT-dU",
+  authDomain: "yeah-58a5c.firebaseapp.com",
+  databaseURL: "https://yeah-58a5c-default-rtdb.firebaseio.com",
+  projectId: "yeah-58a5c",
+  storageBucket: "yeah-58a5c.firebasestorage.app",
+  messagingSenderId: "337596579571",
+  appId: "1:337596579571:web:9ae57689b528d9aa08c186",
+  measurementId: "G-2PDCWW4WEB"
+};
+
+// Firebase imports for when not in Websim
+let initializeApp, getFirestore, collection, addDoc, getDocs, onSnapshot, getStorage, ref, uploadBytes, getDownloadURL;
+
+// Dynamically import Firebase modules if Websim is not detected
+if (typeof websim === 'undefined') {
+  import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js').then(firebase => {
+    initializeApp = firebase.initializeApp;
+    import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js').then(firestore => {
+      getFirestore = firestore.getFirestore;
+      collection = firestore.collection;
+      addDoc = firestore.addDoc;
+      onSnapshot = firestore.onSnapshot;
+      import('https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js').then(storage => {
+        getStorage = storage.getStorage;
+        ref = storage.ref;
+        uploadBytes = storage.uploadBytes;
+        getDownloadURL = storage.getDownloadURL;
+      });
+    });
+  }).catch(e => console.error("Firebase import error:", e));
+}
+
 // Initialize WebsimSocket if available, otherwise use Firebase
 let db;
 if (typeof WebsimSocket !== 'undefined') {
   db = new WebsimSocket();
 } else {
-  // Firebase implementation
-  const firebaseConfig = {
-    apiKey: "AIzaSyDja5QAlLu7k7Vy0ejxmKCGd7YSvTCT-dU",
-    authDomain: "yeah-58a5c.firebaseapp.com",
-    databaseURL: "https://yeah-58a5c-default-rtdb.firebaseio.com",
-    projectId: "yeah-58a5c",
-    storageBucket: "yeah-58a5c.firebasestorage.app",
-    messagingSenderId: "337596579571",
-    appId: "1:337596579571:web:9ae57689b528d9aa08c186",
-    measurementId: "G-2PDCWW4WEB"
-  };
-
-  // Firebase database abstraction
+  // Initialize Firebase only if not in Websim
   db = {
-    collection: (name) => {
+    collection: function (name) {
+      if (typeof initializeApp === 'function') {
+        const firebaseApp = initializeApp(firebaseConfig);
+        const firestore = getFirestore(firebaseApp);
+        const collectionRef = collection(firestore, name);
+        
+        return {
+          subscribe: (callback) => {
+            const q = collectionRef;
+            const unsubscribe = onSnapshot(q, (querySnapshot) => {
+              const data = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              callback(data);
+            });
+            return unsubscribe;
+          },
+          create: async (data) => {
+            const newData = {
+              ...data,
+              created_at: new Date().toISOString(),
+              username: "Anonymous"
+            };
+            const docRef = await addDoc(collectionRef, newData);
+            return {
+              id: docRef.id,
+              ...newData
+            };
+          },
+          getList: () => []
+        };
+      }
       return {
-        subscribe: (callback) => {
-          // Firebase subscription implementation
-          const unsubscribe = () => {};
-          return unsubscribe;
-        },
-        getList: () => [],
-        create: async (data) => {
-          // Firebase create implementation
-          return { id: Date.now().toString(), ...data };
-        }
+        subscribe: () => () => {}, // dummy unsubscribe
+        create: async () => ({ id: Date.now().toString() }),
+        getList: () => []
       };
     }
   };
@@ -71,6 +117,7 @@ function AddonsTab() {
     const [selectedFile, setSelectedFile] = useState(null);
     const [addons, setAddons] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [uploadError, setUploadError] = useState(null); // Add error state
     const fileInputRef = useRef(null);
 
     useEffect(() => {
@@ -114,13 +161,21 @@ function AddonsTab() {
         try {
             console.log('[Upload] Starting upload process...');
             
-            // Use websim.upload if available, otherwise show error
+            // Upload handling
             let fileUrl;
             if (typeof websim !== 'undefined' && websim.upload) {
                 console.log('[Upload] Uploading file to Websim storage...');
                 fileUrl = await websim.upload(selectedFile);
             } else {
-                throw new Error('Websim environment not detected. Upload only works in Websim.');
+                // Only use Firebase storage if we're outside Websim AND Firebase modules are available
+                if (typeof getStorage === 'function') {
+                    const storage = getStorage();
+                    const storageRef = ref(storage, `addons/${selectedFile.name}`);
+                    await uploadBytes(storageRef, selectedFile);
+                    fileUrl = await getDownloadURL(storageRef);
+                } else {
+                    throw new Error('File upload only supported in Websim');
+                }
             }
             
             console.log('[Upload] File successfully uploaded to Websim storage:', fileUrl);
@@ -149,6 +204,7 @@ function AddonsTab() {
             }
             alert('Addon uploaded successfully!');
         } catch (error) {
+            setUploadError(error.message); // Set error message
             console.error('Upload Error:', error);
             
             // Generic error feedback for Websim upload/record creation
@@ -175,12 +231,6 @@ function AddonsTab() {
             alert('Download failed. Please try again.');
         }
     };
-
-    // The 'download' attribute on the <a> tag is used to suggest a filename.
-    // The `addon.file_name` value, which stores the original uploaded file's name (e.g., "my_addon.mcaddon"),
-    // is already used for this purpose. If files are downloading with an incorrect extension (e.g., '.bin'),
-    // it's likely a browser-specific behavior or the Content-Type header from the hosting server.
-    // The current code correctly attempts to preserve the original file extension.
 
     const formatFileSize = (bytes) => {
         if (bytes === 0) return '0 Bytes';
@@ -242,7 +292,12 @@ function AddonsTab() {
                     onClick: handleUpload,
                     disabled: isUploading || !addonName.trim() || !selectedFile 
                 }, isUploading ? 'Uploading...' : 'Upload Addon')
-            )
+            ),
+
+            // Show upload error if exists
+            uploadError && React.createElement('div', { 
+                className: 'upload-error'
+            }, `Upload failed: ${uploadError}`),
         ),
 
         loading ? 
