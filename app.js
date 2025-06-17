@@ -12,71 +12,70 @@ const firebaseConfig = {
   measurementId: "G-2PDCWW4WEB"
 };
 
-// Firebase imports for when not in Websim
-let initializeApp, getFirestore, collection, addDoc, getDocs, onSnapshot, getStorage, ref, uploadBytes, getDownloadURL;
+// Initialize Firebase outside of db object
+let firebaseApp;
+let firestore;
+let storage;
 
-// Dynamically import Firebase modules if Websim is not detected
-if (typeof websim === 'undefined') {
-  import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js').then(firebase => {
-    initializeApp = firebase.initializeApp;
-    import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js').then(firestore => {
-      getFirestore = firestore.getFirestore;
-      collection = firestore.collection;
-      addDoc = firestore.addDoc;
-      onSnapshot = firestore.onSnapshot;
-      import('https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js').then(storage => {
-        getStorage = storage.getStorage;
-        ref = storage.ref;
-        uploadBytes = storage.uploadBytes;
-        getDownloadURL = storage.getDownloadURL;
-      });
-    });
-  }).catch(e => console.error("Firebase import error:", e));
-}
+// Initialize Firebase asynchronously
+const initializeFirebase = async () => {
+  if (typeof firebaseApp !== 'undefined') return;
+  
+  try {
+    const firebaseModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js');
+    firebaseApp = firebaseModule.initializeApp(firebaseConfig);
+    
+    const firestoreModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js');
+    getFirestore = firestoreModule.getFirestore;
+    collection = firestoreModule.collection;
+    addDoc = firestoreModule.addDoc;
+    onSnapshot = firestoreModule.onSnapshot;
+    firestore = getFirestore(firebaseApp);
+    
+    const storageModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js');
+    getStorage = storageModule.getStorage;
+    ref = storageModule.ref;
+    uploadBytes = storageModule.uploadBytes;
+    getDownloadURL = storageModule.getDownloadURL;
+    storage = getStorage(firebaseApp);
+  } catch (e) {
+    console.error("Firebase initialization failed", e);
+  }
+};
 
 // Initialize WebsimSocket if available, otherwise use Firebase
 let db;
 if (typeof WebsimSocket !== 'undefined') {
   db = new WebsimSocket();
 } else {
-  // Initialize Firebase only if not in Websim
   db = {
     collection: function (name) {
-      if (typeof initializeApp === 'function') {
-        const firebaseApp = initializeApp(firebaseConfig);
-        const firestore = getFirestore(firebaseApp);
-        const collectionRef = collection(firestore, name);
-        
-        return {
-          subscribe: (callback) => {
-            const q = collectionRef;
-            const unsubscribe = onSnapshot(q, (querySnapshot) => {
-              const data = querySnapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              }));
-              callback(data);
-            });
-            return unsubscribe;
-          },
-          create: async (data) => {
-            const newData = {
-              ...data,
-              created_at: new Date().toISOString(),
-              username: "Anonymous"
-            };
-            const docRef = await addDoc(collectionRef, newData);
-            return {
-              id: docRef.id,
-              ...newData
-            };
-          },
-          getList: () => []
-        };
-      }
       return {
-        subscribe: () => () => {}, // dummy unsubscribe
-        create: async () => ({ id: Date.now().toString() }),
+        subscribe: async (callback) => {
+          await initializeFirebase();
+          const collectionRef = collection(firestore, name);
+          const unsubscribe = onSnapshot(collectionRef, (querySnapshot) => {
+            const data = querySnapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
+            callback(data);
+          });
+          return unsubscribe;
+        },
+        create: async (data) => {
+          await initializeFirebase();
+          const newData = {
+            ...data,
+            created_at: new Date().toISOString(),
+            username: "Anonymous"
+          };
+          const docRef = await addDoc(collection(firestore, name), newData);
+          return {
+            id: docRef.id,
+            ...newData
+          };
+        },
         getList: () => []
       };
     }
