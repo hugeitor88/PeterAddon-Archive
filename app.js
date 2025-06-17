@@ -1,6 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 
+// Initialize Firebase with proper async handling
+let fireApp;
+let firestore;
+let storage;
+let getFirestore, collection, addDoc, onSnapshot, ref, uploadBytes, getDownloadURL;
+
+/* @tweakable Firebase configuration object */
 const firebaseConfig = {
   apiKey: "AIzaSyDja5QAlLu7k7Vy0ejxmKCGd7YSvTCT-dU",
   authDomain: "yeah-58a5c.firebaseapp.com",
@@ -12,34 +19,51 @@ const firebaseConfig = {
   measurementId: "G-2PDCWW4WEB"
 };
 
-// Initialize Firebase outside of db object
-let firebaseApp;
-let firestore;
-let storage;
-
-// Initialize Firebase asynchronously
+// Firebase initialization with validation
 const initializeFirebase = async () => {
-  if (typeof firebaseApp !== 'undefined') return;
+  if (firebaseApp) return;
   
   try {
-    const firebaseModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js');
-    firebaseApp = firebaseModule.initializeApp(firebaseConfig);
+    // Validate config
+    const requiredFields = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+    const missingFields = requiredFields.filter(field => !firebaseConfig[field] || firebaseConfig[field].trim() === '');
+    
+    if (missingFields.length > 0) {
+      throw new Error(`Missing Firebase config fields: ${missingFields.join(', ')}`);
+    }
+
+    // Import and initialize Firebase
+    const { initializeApp } = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js');
+    firebaseApp = initializeApp(firebaseConfig);
     
     const firestoreModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js');
-    getFirestore = firestoreModule.getFirestore;
-    collection = firestoreModule.collection;
-    addDoc = firestoreModule.addDoc;
-    onSnapshot = firestoreModule.onSnapshot;
+    ({ getFirestore, collection, addDoc, onSnapshot } = firestoreModule);
     firestore = getFirestore(firebaseApp);
     
     const storageModule = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js');
-    getStorage = storageModule.getStorage;
-    ref = storageModule.ref;
-    uploadBytes = storageModule.uploadBytes;
-    getDownloadURL = storageModule.getDownloadURL;
+    ({ getStorage, ref, uploadBytes, getDownloadURL } = storageModule);
     storage = getStorage(firebaseApp);
   } catch (e) {
     console.error("Firebase initialization failed", e);
+    
+    // Show error banner
+    const errorMessage = `Firebase Setup Failed. Please check configuration. Error: ${e.message}`;
+    const errorContainer = document.createElement('div');
+    errorContainer.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      background-color: #ff3333;
+      color: white;
+      padding: 20px;
+      text-align: center;
+      z-index: 1000;
+    `;
+    errorContainer.textContent = errorMessage;
+    document.body.prepend(errorContainer);
+    
+    throw e;
   }
 };
 
