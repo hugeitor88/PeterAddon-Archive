@@ -70,26 +70,29 @@ const initializeFirebase = async () => {
 
 // Initialize WebsimSocket if available, otherwise use Firebase
 let db;
-if (typeof WebsimSocket !== 'undefined') {
+let isWebsimEnvironment = typeof WebsimSocket !== 'undefined';
+
+if (isWebsimEnvironment) {
   db = new WebsimSocket();
 } else {
+  // Initialize Firebase immediately if not in Websim
+  await initializeFirebase();
+  
   db = {
     collection: function (name) {
       return {
-        subscribe: async (callback) => {
-          await initializeFirebase();
+        subscribe: (callback) => {
           const collectionRef = collection(firestore, name);
           const unsubscribe = onSnapshot(collectionRef, (querySnapshot) => {
             const data = querySnapshot.docs.map(doc => ({
               id: doc.id,
               ...doc.data()
-            }));
+            })).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); // Sort newest first
             callback(data);
           });
           return unsubscribe;
         },
         create: async (data) => {
-          await initializeFirebase();
           const newData = {
             ...data,
             created_at: new Date().toISOString(),
@@ -181,30 +184,27 @@ function AddonsTab() {
         }
 
         setIsUploading(true);
+        setUploadError(null);
         
         try {
             console.log('[Upload] Starting upload process...');
             
             // Upload handling
             let fileUrl;
-            if (typeof websim !== 'undefined' && websim.upload) {
+            if (isWebsimEnvironment && typeof websim !== 'undefined' && websim.upload) {
                 console.log('[Upload] Uploading file to Websim storage...');
                 fileUrl = await websim.upload(selectedFile);
             } else {
-                // Initialize Firebase before using storage
-                await initializeFirebase();
-                
-                // Now Firebase storage functions are available
-                const storage = getStorage();
-                const storageRef = ref(storage, `addons/${selectedFile.name}`);
-                await uploadBytes(storageRef, selectedFile);
-                fileUrl = await getDownloadURL(storageRef);
+                console.log('[Upload] Uploading file to Firebase storage...');
+                const storageRef = ref(storage, `addons/${Date.now()}_${selectedFile.name}`);
+                const snapshot = await uploadBytes(storageRef, selectedFile);
+                fileUrl = await getDownloadURL(snapshot.ref);
             }
             
-            console.log('[Upload] File successfully uploaded to Websim storage:', fileUrl);
+            console.log('[Upload] File successfully uploaded:', fileUrl);
             
-            // Save addon metadata using Websim records
-            console.log('[Upload] Saving addon metadata to Websim records...');
+            // Save addon metadata
+            console.log('[Upload] Saving addon metadata...');
             await db.collection('addon_v1').create({
                 name: addonName.trim(),
                 description: addonDescription.trim(),
@@ -215,22 +215,18 @@ function AddonsTab() {
             });
 
             console.log('[Upload] Addon record created successfully');
-            
-            // No need to manually update local state (setAddons) as the subscription will handle it.
 
             // Clear form
             setAddonName('');
             setAddonDescription('');
             setSelectedFile(null);
             if (fileInputRef.current) {
-                fileInputRef.current.value = ''; // Clear file input value
+                fileInputRef.current.value = '';
             }
             alert('Addon uploaded successfully!');
         } catch (error) {
-            setUploadError(error.message); // Set error message
+            setUploadError(error.message);
             console.error('Upload Error:', error);
-            
-            // Generic error feedback for Websim upload/record creation
             alert(`Upload Failed: ${error.message || 'Unknown error during upload. Please try again.'}`);
         } finally {
             setIsUploading(false);
